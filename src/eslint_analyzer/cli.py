@@ -69,7 +69,7 @@ def run_cmd(args: list[str], cwd: Path | None = None, check: bool = True) -> sub
 def discover_repos(org: str) -> list[Repo]:
     logger.info("Discovering repositories for org {}", org)
     try:
-        proc = run_cmd(["gh", "api", f"/orgs/{org}/repos", "--paginate"])
+        proc = run_cmd(["gh", "api", f"/orgs/{org}/repos?type=public", "--paginate"])
     except FileNotFoundError as exc:
         raise click.ClickException("Missing `gh` CLI in PATH.") from exc
     except subprocess.CalledProcessError as exc:
@@ -211,8 +211,6 @@ def export_results(output: Path, fmt: str, counter: Counter[str], rule_to_repos:
 
 def build_summary(counter: Counter[str], rule_to_repos: dict[str, set[str]], analyzed: int, skipped: int) -> str:
     lines = [
-        "## Latest Findings",
-        "",
         f"Analyzed repositories: **{analyzed}**",
         f"Skipped repositories: **{skipped}**",
         f"Total ESLint disable directives found: **{sum(counter.values())}**",
