@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import html
 import json
 import re
 import subprocess
@@ -9,6 +10,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Iterable
+from urllib.parse import quote
 
 import click
 from loguru import logger
@@ -44,6 +46,14 @@ class Repo:
     @property
     def full_name(self) -> str:
         return f"{self.org}/{self.name}"
+
+
+@dataclass(frozen=True)
+class Occurrence:
+    repo: str
+    commit_sha: str
+    file_path: str
+    line: int
 
 
 def setup_logging() -> None:
@@ -124,6 +134,10 @@ def has_local_branch(path: Path, branch: str) -> bool:
     return bool(proc.stdout.strip())
 
 
+def current_commit_sha(path: Path) -> str:
+    return run_cmd(["git", "rev-parse", "HEAD"], cwd=path).stdout.strip()
+
+
 def sync_repo(repo: Repo, root_dir: Path) -> tuple[bool, str | None]:
     repo_path = root_dir / repo.name
 
@@ -184,7 +198,14 @@ def parse_rules(raw_rules: str) -> list[str]:
     return rules or ["__all_rules__"]
 
 
-def scan_repo(repo: Repo, repo_path: Path, counter: Counter[str], rule_to_repos: dict[str, set[str]]) -> None:
+def scan_repo(
+    repo: Repo,
+    repo_path: Path,
+    commit_sha: str,
+    counter: Counter[str],
+    rule_to_repos: dict[str, set[str]],
+    rule_to_occurrences: dict[str, list[Occurrence]],
+) -> None:
     for file_path in iter_files(repo_path):
         try:
             text = file_path.read_text(encoding="utf-8", errors="replace")
@@ -193,9 +214,12 @@ def scan_repo(repo: Repo, repo_path: Path, counter: Counter[str], rule_to_repos:
 
         for match in DISABLE_DIRECTIVE_RE.finditer(text):
             rules = parse_rules(match.group("rules") or "")
+            line = text.count("\n", 0, match.start()) + 1
+            relative_path = file_path.relative_to(repo_path).as_posix()
             for rule in rules:
                 counter[rule] += 1
                 rule_to_repos[rule].add(repo.full_name)
+                rule_to_occurrences[rule].append(Occurrence(repo.full_name, commit_sha, relative_path, line))
 
 
 def export_results(output: Path, fmt: str, counter: Counter[str], rule_to_repos: dict[str, set[str]]) -> None:
@@ -210,22 +234,38 @@ def export_results(output: Path, fmt: str, counter: Counter[str], rule_to_repos:
             writer.writerow([rule, count, repos])
 
 
-def build_summary(counter: Counter[str], rule_to_repos: dict[str, set[str]], analyzed: int, skipped: int) -> str:
+def github_blob_url(occurrence: Occurrence) -> str:
+    quoted_path = quote(occurrence.file_path, safe="/")
+    return f"https://github.com/{occurrence.repo}/blob/{occurrence.commit_sha}/{quoted_path}#L{occurrence.line}"
+
+
+def build_count_details(occurrences: list[Occurrence]) -> str:
+    items = []
+    for occurrence in sorted(occurrences, key=lambda item: (item.repo, item.file_path, item.line)):
+        label = html.escape(f"{occurrence.repo}/{occurrence.file_path}:{occurrence.line}")
+        items.append(f'<li><a href="{github_blob_url(occurrence)}">{label}</a></li>')
+
+    return f"<details><summary>{len(occurrences)}</summary><ul>{''.join(items)}</ul></details>"
+
+
+def build_summary(
+    counter: Counter[str],
+    rule_to_repos: dict[str, set[str]],
+    rule_to_occurrences: dict[str, list[Occurrence]],
+    analyzed: int,
+    skipped: int,
+) -> str:
     total_directives = sum(counter.values())
-    analyzed_status = "✅" if analyzed > 0 else "❌"
-    skipped_status = "🎉" if skipped == 0 else "⚠️"
-    directives_status = "🧹" if total_directives == 0 else "🔎"
-    rules_status = "✅" if len(counter) == 0 else "📋"
     last_updated = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
 
     lines = [
-        "| Status | Metric | Value |",
-        "| --- | --- | ---: |",
-        f"| 🕒 | Last updated | **{last_updated}** |",
-        f"| {analyzed_status} | Analyzed repositories | **{analyzed}** |",
-        f"| {skipped_status} | Skipped repositories | **{'None' if skipped == 0 else skipped}** |",
-        f"| {directives_status} | Total ESLint disable directives found | **{total_directives}** |",
-        f"| {rules_status} | Unique ignored rules | **{len(counter)}** |",
+        "| Metric | Value |",
+        "| --- | ---: |",
+        f"| Last updated | **{last_updated}** |",
+        f"| Analyzed repositories | **{analyzed}** |",
+        f"| Skipped repositories | **{'None' if skipped == 0 else skipped}** |",
+        f"| Total ESLint disable directives found | **{total_directives}** |",
+        f"| Unique ignored rules | **{len(counter)}** |",
         "",
         "### Top 10 Ignored Rules",
         "",
@@ -239,15 +279,23 @@ def build_summary(counter: Counter[str], rule_to_repos: dict[str, set[str]], ana
         "| Rule | Count | Repositories |",
         "| --- | ---: | --- |",
     ])
-    for rule, count in counter.most_common(10):
-        repos_list = ", ".join(sorted(rule_to_repos[rule]))
-        lines.append(f"| `{rule}` | {count} | {repos_list} |")
+    for rule, _ in counter.most_common(10):
+        count_details = build_count_details(rule_to_occurrences[rule])
+        repos_list = ", ".join(f"[{repo}](https://github.com/{repo})" for repo in sorted(rule_to_repos[rule]))
+        lines.append(f"| `{rule}` | {count_details} | {repos_list} |")
 
     return "\n".join(lines) + "\n"
 
 
-def export_summary(output: Path, counter: Counter[str], rule_to_repos: dict[str, set[str]], analyzed: int, skipped: int) -> None:
-    output.write_text(build_summary(counter, rule_to_repos, analyzed, skipped), encoding="utf-8")
+def export_summary(
+    output: Path,
+    counter: Counter[str],
+    rule_to_repos: dict[str, set[str]],
+    rule_to_occurrences: dict[str, list[Occurrence]],
+    analyzed: int,
+    skipped: int,
+) -> None:
+    output.write_text(build_summary(counter, rule_to_repos, rule_to_occurrences, analyzed, skipped), encoding="utf-8")
 
 
 @click.command()
@@ -270,6 +318,7 @@ def main(org: str, root_dir: Path, output: Path, summary_output: Path | None, ou
 
     counter: Counter[str] = Counter()
     rule_to_repos: dict[str, set[str]] = defaultdict(set)
+    rule_to_occurrences: dict[str, list[Occurrence]] = defaultdict(list)
     analyzed = 0
     skipped = 0
 
@@ -281,7 +330,8 @@ def main(org: str, root_dir: Path, output: Path, summary_output: Path | None, ou
             continue
 
         try:
-            scan_repo(repo, root_dir / repo.name, counter, rule_to_repos)
+            repo_path = root_dir / repo.name
+            scan_repo(repo, repo_path, current_commit_sha(repo_path), counter, rule_to_repos, rule_to_occurrences)
             analyzed += 1
             logger.info("Analyzed {}", repo.full_name)
         except Exception as exc:
@@ -291,7 +341,7 @@ def main(org: str, root_dir: Path, output: Path, summary_output: Path | None, ou
     export_results(output, output_format, counter, rule_to_repos)
     logger.success("Saved report to {}", output)
     if summary_output is not None:
-        export_summary(summary_output, counter, rule_to_repos, analyzed, skipped)
+        export_summary(summary_output, counter, rule_to_repos, rule_to_occurrences, analyzed, skipped)
         logger.success("Saved summary to {}", summary_output)
     logger.info("Analyzed repositories: {}", analyzed)
     logger.warning("Skipped repositories: {}", skipped)
