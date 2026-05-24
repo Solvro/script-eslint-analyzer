@@ -15,7 +15,6 @@ from urllib.parse import quote
 import click
 from loguru import logger
 
-
 SKIP_DIRS = {
     ".git",
     "node_modules",
@@ -65,7 +64,9 @@ def setup_logging() -> None:
     )
 
 
-def run_cmd(args: list[str], cwd: Path | None = None, check: bool = True) -> subprocess.CompletedProcess[str]:
+def run_cmd(
+    args: list[str], cwd: Path | None = None, check: bool = True
+) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         args,
         cwd=str(cwd) if cwd else None,
@@ -84,7 +85,9 @@ def discover_repos(org: str) -> list[Repo]:
     except FileNotFoundError as exc:
         raise click.ClickException("Missing `gh` CLI in PATH.") from exc
     except subprocess.CalledProcessError as exc:
-        raise click.ClickException(f"Failed to query GitHub: {exc.stderr.strip()}") from exc
+        raise click.ClickException(
+            f"Failed to query GitHub: {exc.stderr.strip()}"
+        ) from exc
 
     try:
         payload = json.loads(proc.stdout)
@@ -159,8 +162,12 @@ def sync_repo(repo: Repo, root_dir: Path) -> tuple[bool, str | None]:
 
     local_ref = f"refs/heads/{repo.default_branch}"
     remote_ref = f"refs/remotes/origin/{repo.default_branch}"
-    local_sha = run_cmd(["git", "rev-parse", local_ref], cwd=repo_path, check=False).stdout.strip()
-    remote_sha = run_cmd(["git", "rev-parse", remote_ref], cwd=repo_path, check=False).stdout.strip()
+    local_sha = run_cmd(
+        ["git", "rev-parse", local_ref], cwd=repo_path, check=False
+    ).stdout.strip()
+    remote_sha = run_cmd(
+        ["git", "rev-parse", remote_ref], cwd=repo_path, check=False
+    ).stdout.strip()
 
     if not remote_sha:
         return False, f"missing remote branch origin/{repo.default_branch}"
@@ -175,8 +182,20 @@ def sync_repo(repo: Repo, root_dir: Path) -> tuple[bool, str | None]:
         if has_local_branch(repo_path, repo.default_branch):
             run_cmd(["git", "checkout", repo.default_branch], cwd=repo_path)
         else:
-            run_cmd(["git", "checkout", "-b", repo.default_branch, "--track", f"origin/{repo.default_branch}"], cwd=repo_path)
-        run_cmd(["git", "pull", "--ff-only", "origin", repo.default_branch], cwd=repo_path)
+            run_cmd(
+                [
+                    "git",
+                    "checkout",
+                    "-b",
+                    repo.default_branch,
+                    "--track",
+                    f"origin/{repo.default_branch}",
+                ],
+                cwd=repo_path,
+            )
+        run_cmd(
+            ["git", "pull", "--ff-only", "origin", repo.default_branch], cwd=repo_path
+        )
         return True, None
     except subprocess.CalledProcessError as exc:
         return False, f"sync failed: {exc.stderr.strip()}"
@@ -219,10 +238,14 @@ def scan_repo(
             for rule in rules:
                 counter[rule] += 1
                 rule_to_repos[rule].add(repo.full_name)
-                rule_to_occurrences[rule].append(Occurrence(repo.full_name, commit_sha, relative_path, line))
+                rule_to_occurrences[rule].append(
+                    Occurrence(repo.full_name, commit_sha, relative_path, line)
+                )
 
 
-def export_results(output: Path, fmt: str, counter: Counter[str], rule_to_repos: dict[str, set[str]]) -> None:
+def export_results(
+    output: Path, fmt: str, counter: Counter[str], rule_to_repos: dict[str, set[str]]
+) -> None:
     delimiter = "\t" if fmt == "tsv" else ","
     rows = sorted(counter.items(), key=lambda item: (-item[1], item[0]))
 
@@ -241,8 +264,12 @@ def github_blob_url(occurrence: Occurrence) -> str:
 
 def build_count_details(occurrences: list[Occurrence]) -> str:
     items = []
-    for occurrence in sorted(occurrences, key=lambda item: (item.repo, item.file_path, item.line)):
-        label = html.escape(f"{occurrence.repo}/{occurrence.file_path}:{occurrence.line}")
+    for occurrence in sorted(
+        occurrences, key=lambda item: (item.repo, item.file_path, item.line)
+    ):
+        label = html.escape(
+            f"{occurrence.repo}/{occurrence.file_path}:{occurrence.line}"
+        )
         items.append(f'<li><a href="{github_blob_url(occurrence)}">{label}</a></li>')
 
     return f"<details><summary>{len(occurrences)}</summary><ul>{''.join(items)}</ul></details>"
@@ -256,6 +283,11 @@ def build_summary(
     skipped: int,
 ) -> str:
     total_directives = sum(counter.values())
+    repo_counter: Counter[str] = Counter(
+        occurrence.repo
+        for occurrences in rule_to_occurrences.values()
+        for occurrence in occurrences
+    )
     last_updated = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
 
     lines = [
@@ -267,21 +299,43 @@ def build_summary(
         f"| Total ESLint disable directives found | **{total_directives}** |",
         f"| Unique ignored rules | **{len(counter)}** |",
         "",
-        "### Top 10 Ignored Rules",
-        "",
     ]
 
     if not counter:
         lines.append("No ESLint disable directives were found.")
         return "\n".join(lines) + "\n"
 
-    lines.extend([
-        "| Rule | Count | Repositories |",
-        "| --- | ---: | --- |",
-    ])
+    lines.extend(
+        [
+            "### Most Cursed Codebases",
+            "",
+            "| Repository | Ignores |",
+            "| --- | ---: |",
+        ]
+    )
+    for repo, count in repo_counter.most_common(5):
+        lines.append(f"| [{repo}](https://github.com/{repo}) | {count} |")
+
+    lines.extend(
+        [
+            "",
+            "### Top 10 Ignored Rules",
+            "",
+        ]
+    )
+
+    lines.extend(
+        [
+            "| Rule | Count | Repositories |",
+            "| --- | ---: | --- |",
+        ]
+    )
     for rule, _ in counter.most_common(10):
         count_details = build_count_details(rule_to_occurrences[rule])
-        repos_list = ", ".join(f"[{repo}](https://github.com/{repo})" for repo in sorted(rule_to_repos[rule]))
+        repos_list = ", ".join(
+            f"[{repo}](https://github.com/{repo})"
+            for repo in sorted(rule_to_repos[rule])
+        )
         lines.append(f"| `{rule}` | {count_details} | {repos_list} |")
 
     return "\n".join(lines) + "\n"
@@ -295,16 +349,48 @@ def export_summary(
     analyzed: int,
     skipped: int,
 ) -> None:
-    output.write_text(build_summary(counter, rule_to_repos, rule_to_occurrences, analyzed, skipped), encoding="utf-8")
+    output.write_text(
+        build_summary(counter, rule_to_repos, rule_to_occurrences, analyzed, skipped),
+        encoding="utf-8",
+    )
 
 
 @click.command()
 @click.option("--org", default="Solvro", show_default=True, help="GitHub organization")
-@click.option("--root-dir", default="~/repos", show_default=True, type=click.Path(path_type=Path), help="Directory for local clones")
-@click.option("--output", default="result.tsv", show_default=True, type=click.Path(path_type=Path), help="Report file path")
-@click.option("--summary-output", type=click.Path(path_type=Path), help="Markdown summary file path")
-@click.option("--format", "output_format", type=click.Choice(["tsv", "csv"]), default="tsv", show_default=True, help="Output format")
-def main(org: str, root_dir: Path, output: Path, summary_output: Path | None, output_format: str) -> None:
+@click.option(
+    "--root-dir",
+    default="~/repos",
+    show_default=True,
+    type=click.Path(path_type=Path),
+    help="Directory for local clones",
+)
+@click.option(
+    "--output",
+    default="result.tsv",
+    show_default=True,
+    type=click.Path(path_type=Path),
+    help="Report file path",
+)
+@click.option(
+    "--summary-output",
+    type=click.Path(path_type=Path),
+    help="Markdown summary file path",
+)
+@click.option(
+    "--format",
+    "output_format",
+    type=click.Choice(["tsv", "csv"]),
+    default="tsv",
+    show_default=True,
+    help="Output format",
+)
+def main(
+    org: str,
+    root_dir: Path,
+    output: Path,
+    summary_output: Path | None,
+    output_format: str,
+) -> None:
     setup_logging()
 
     root_dir = root_dir.expanduser().resolve()
@@ -331,7 +417,14 @@ def main(org: str, root_dir: Path, output: Path, summary_output: Path | None, ou
 
         try:
             repo_path = root_dir / repo.name
-            scan_repo(repo, repo_path, current_commit_sha(repo_path), counter, rule_to_repos, rule_to_occurrences)
+            scan_repo(
+                repo,
+                repo_path,
+                current_commit_sha(repo_path),
+                counter,
+                rule_to_repos,
+                rule_to_occurrences,
+            )
             analyzed += 1
             logger.info("Analyzed {}", repo.full_name)
         except Exception as exc:
@@ -341,7 +434,14 @@ def main(org: str, root_dir: Path, output: Path, summary_output: Path | None, ou
     export_results(output, output_format, counter, rule_to_repos)
     logger.success("Saved report to {}", output)
     if summary_output is not None:
-        export_summary(summary_output, counter, rule_to_repos, rule_to_occurrences, analyzed, skipped)
+        export_summary(
+            summary_output,
+            counter,
+            rule_to_repos,
+            rule_to_occurrences,
+            analyzed,
+            skipped,
+        )
         logger.success("Saved summary to {}", summary_output)
     logger.info("Analyzed repositories: {}", analyzed)
     logger.warning("Skipped repositories: {}", skipped)
