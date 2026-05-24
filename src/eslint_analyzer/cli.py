@@ -264,24 +264,29 @@ def github_blob_url(occurrence: Occurrence) -> str:
 
 def build_count_details(occurrences: list[Occurrence]) -> str:
     items = []
-    for occurrence in sorted(
-        occurrences, key=lambda item: (item.repo, item.file_path, item.line)
-    ):
+    sorted_occurrences = sorted(
+        occurrences,
+        key=lambda item: f"{item.repo}/{item.file_path}:{item.line}".casefold(),
+    )
+    for occurrence in sorted_occurrences:
         label = html.escape(
             f"{occurrence.repo}/{occurrence.file_path}:{occurrence.line}"
         )
         items.append(f'<li><a href="{github_blob_url(occurrence)}">{label}</a></li>')
 
-    return f"<details><summary>{len(occurrences)}</summary><ul>{''.join(items)}</ul></details>"
+    return f"<details><summary>{len(occurrences)}</summary><ol>{''.join(items)}</ol></details>"
 
 
 def build_repo_count_details(occurrences: list[Occurrence]) -> str:
     items = []
-    for occurrence in sorted(occurrences, key=lambda item: (item.file_path, item.line)):
+    sorted_occurrences = sorted(
+        occurrences, key=lambda item: f"{item.file_path}:{item.line}".casefold()
+    )
+    for occurrence in sorted_occurrences:
         label = html.escape(f"{occurrence.file_path}:{occurrence.line}")
         items.append(f'<li><a href="{github_blob_url(occurrence)}">{label}</a></li>')
 
-    return f"<details><summary>{len(occurrences)}</summary><ul>{''.join(items)}</ul></details>"
+    return f"<details><summary>{len(occurrences)}</summary><ol>{''.join(items)}</ol></details>"
 
 
 def build_summary(
@@ -318,7 +323,7 @@ def build_summary(
             "### Most Cursed Codebases",
             "",
             "| Repository | Ignores |",
-            "| --- | ---: |",
+            "| --- | --- |",
         ]
     )
     for repo, occurrences in sorted(
@@ -338,7 +343,7 @@ def build_summary(
     lines.extend(
         [
             "| Rule | Count | Repositories |",
-            "| --- | ---: | --- |",
+            "| --- | --- | --- |",
         ]
     )
     for rule, _ in counter.most_common(10):
