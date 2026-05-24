@@ -5,7 +5,25 @@ CLI tool that discovers selected Solvro repositories, syncs local clones, scans 
 ## Current Findings
 
 <!-- eslint-analyzer-summary:start -->
-The automated summary has not been generated yet.
+Analyzed repositories: **49**
+Skipped repositories: **0**
+Total ESLint disable directives found: **381**
+Unique ignored rules: **85**
+
+### Top 10 Ignored Rules
+
+| Rule | Count | Repositories |
+| --- | ---: | --- |
+| `@typescript-eslint/no-unsafe-assignment` | 25 | Solvro/backend-eventownik-v2, Solvro/backend-eventownik-v3, Solvro/backend-jak-doczlapie, Solvro/backend-topwr, Solvro/web-strona-w4, Solvro/web-testownik, Solvro/web-topwr, Solvro/web-unite-x-graz |
+| `@typescript-eslint/no-unsafe-return` | 23 | Solvro/backend-eventownik-v3, Solvro/web-eventownik-v2, Solvro/web-strona-w4, Solvro/web-topwr, Solvro/web-unite-x-graz |
+| `@typescript-eslint/no-unsafe-call` | 21 | Solvro/backend-eventownik-v3, Solvro/backend-jak-doczlapie, Solvro/web-eventownik-v2, Solvro/web-testownik, Solvro/web-topwr |
+| `@typescript-eslint/no-unnecessary-condition` | 19 | Solvro/backend-eventownik-v2, Solvro/backend-jak-doczlapie, Solvro/backend-topwr, Solvro/web-eventownik-v2, Solvro/web-planer, Solvro/web-strona-w4, Solvro/web-testownik |
+| `@typescript-eslint/no-deprecated` | 19 | Solvro/web-testownik |
+| `react-hooks/exhaustive-deps` | 17 | Solvro/web-eventownik-v2, Solvro/web-planer, Solvro/web-testownik |
+| `import/no-default-export` | 13 | Solvro/backend-eventownik-v3, Solvro/web-eventownik-v2, Solvro/web-juwenalia, Solvro/web-planer, Solvro/web-promochator, Solvro/web-testownik, Solvro/web-unite-x-graz |
+| `@typescript-eslint/unbound-method` | 13 | Solvro/backend-eventownik-v3 |
+| `no-useless-constructor` | 12 | Solvro/backend-eventownik-v2 |
+| `@next/next/no-img-element` | 11 | Solvro/web-planer, Solvro/web-testownik, Solvro/web-topwr |
 <!-- eslint-analyzer-summary:end -->
 
 ## Prerequisites
