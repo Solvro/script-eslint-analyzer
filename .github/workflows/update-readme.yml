@@ -1,0 +1,60 @@
+name: Update README findings
+
+on:
+  schedule:
+    - cron: "0 12 * * 0"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update-readme:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          repository: Solvro/script-eslint-analyzer
+          token: ${{ secrets.GITHUB_TOKEN }}
+          ref: main
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Run analyzer
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          uv run eslint-analyzer \
+            --org Solvro \
+            --root-dir "$RUNNER_TEMP/eslint-analyzer-repos" \
+            --output result.tsv \
+            --format tsv \
+            --summary-output summary.md
+
+      - name: Update README generated section
+        run: python scripts/update_readme.py --readme README.md --summary summary.md
+
+      - name: Commit and push README changes
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet -- README.md; then
+            echo "README findings are already up to date."
+            exit 0
+          fi
+          git add README.md
+          git commit -m "chore(readme): update ESLint analyzer findings"
+          git push "https://x-access-token:${GITHUB_TOKEN}@github.com/Solvro/script-eslint-analyzer.git" HEAD:main

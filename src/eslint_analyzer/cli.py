@@ -69,7 +69,7 @@ def run_cmd(args: list[str], cwd: Path | None = None, check: bool = True) -> sub
 def discover_repos(org: str) -> list[Repo]:
     logger.info("Discovering repositories for org {}", org)
     try:
-        proc = run_cmd(["gh", "api", f"/orgs/{org}/repos", "--paginate"])
+        proc = run_cmd(["gh", "api", f"/orgs/{org}/repos?type=public", "--paginate"])
     except FileNotFoundError as exc:
         raise click.ClickException("Missing `gh` CLI in PATH.") from exc
     except subprocess.CalledProcessError as exc:
@@ -209,16 +209,49 @@ def export_results(output: Path, fmt: str, counter: Counter[str], rule_to_repos:
             writer.writerow([rule, count, repos])
 
 
+def build_summary(counter: Counter[str], rule_to_repos: dict[str, set[str]], analyzed: int, skipped: int) -> str:
+    lines = [
+        f"Analyzed repositories: **{analyzed}**",
+        f"Skipped repositories: **{skipped}**",
+        f"Total ESLint disable directives found: **{sum(counter.values())}**",
+        f"Unique ignored rules: **{len(counter)}**",
+        "",
+        "### Top 10 Ignored Rules",
+        "",
+    ]
+
+    if not counter:
+        lines.append("No ESLint disable directives were found.")
+        return "\n".join(lines) + "\n"
+
+    lines.extend([
+        "| Rule | Count | Repositories |",
+        "| --- | ---: | --- |",
+    ])
+    for rule, count in counter.most_common(10):
+        repos_list = ", ".join(sorted(rule_to_repos[rule]))
+        lines.append(f"| `{rule}` | {count} | {repos_list} |")
+
+    return "\n".join(lines) + "\n"
+
+
+def export_summary(output: Path, counter: Counter[str], rule_to_repos: dict[str, set[str]], analyzed: int, skipped: int) -> None:
+    output.write_text(build_summary(counter, rule_to_repos, analyzed, skipped), encoding="utf-8")
+
+
 @click.command()
 @click.option("--org", default="Solvro", show_default=True, help="GitHub organization")
 @click.option("--root-dir", default="~/repos", show_default=True, type=click.Path(path_type=Path), help="Directory for local clones")
 @click.option("--output", default="result.tsv", show_default=True, type=click.Path(path_type=Path), help="Report file path")
+@click.option("--summary-output", type=click.Path(path_type=Path), help="Markdown summary file path")
 @click.option("--format", "output_format", type=click.Choice(["tsv", "csv"]), default="tsv", show_default=True, help="Output format")
-def main(org: str, root_dir: Path, output: Path, output_format: str) -> None:
+def main(org: str, root_dir: Path, output: Path, summary_output: Path | None, output_format: str) -> None:
     setup_logging()
 
     root_dir = root_dir.expanduser().resolve()
     output = output.expanduser().resolve()
+    if summary_output is not None:
+        summary_output = summary_output.expanduser().resolve()
 
     root_dir.mkdir(parents=True, exist_ok=True)
 
@@ -246,6 +279,9 @@ def main(org: str, root_dir: Path, output: Path, output_format: str) -> None:
 
     export_results(output, output_format, counter, rule_to_repos)
     logger.success("Saved report to {}", output)
+    if summary_output is not None:
+        export_summary(summary_output, counter, rule_to_repos, analyzed, skipped)
+        logger.success("Saved summary to {}", summary_output)
     logger.info("Analyzed repositories: {}", analyzed)
     logger.warning("Skipped repositories: {}", skipped)
 
