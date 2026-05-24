@@ -1,0 +1,23 @@
+[project]
+name = "script-eslint-analyzer"
+version = "0.1.0"
+description = "CLI for analyzing ESLint disable directives across Solvro repositories"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+  "click>=8.1.7",
+  "loguru>=0.7.2",
+]
+
+[project.scripts]
+eslint-analyzer = "eslint_analyzer.cli:main"
+
+[build-system]
+requires = ["hatchling>=1.25.0"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/eslint_analyzer"]
+
+[tool.uv]
+package = true
