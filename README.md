@@ -7,11 +7,21 @@ CLI tool that discovers selected Solvro repositories, syncs local clones, scans 
 <!-- eslint-analyzer-summary:start -->
 | Metric | Value |
 | --- | ---: |
-| Last updated | **2026-05-24 13:29 UTC** |
+| Last updated | **2026-05-24 13:47 UTC** |
 | Analyzed repositories | **49** |
 | Skipped repositories | **None** |
 | Total ESLint disable directives found | **381** |
 | Unique ignored rules | **85** |
+
+### Most Cursed Codebases
+
+| Repository | Ignores |
+| --- | ---: |
+| [Solvro/web-testownik](https://github.com/Solvro/web-testownik) | 85 |
+| [Solvro/backend-eventownik-v3](https://github.com/Solvro/backend-eventownik-v3) | 66 |
+| [Solvro/web-eventownik-v2](https://github.com/Solvro/web-eventownik-v2) | 47 |
+| [Solvro/web-planer](https://github.com/Solvro/web-planer) | 45 |
+| [Solvro/backend-eventownik-v2](https://github.com/Solvro/backend-eventownik-v2) | 26 |
 
 ### Top 10 Ignored Rules
 
