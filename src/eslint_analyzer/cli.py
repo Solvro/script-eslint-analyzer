@@ -34,6 +34,7 @@ DISABLE_DIRECTIVE_RE = re.compile(
 )
 
 RULE_TOKEN_RE = re.compile(r"[A-Za-z0-9@_./:-]+")
+MARKDOWN_ESCAPE_RE = re.compile(r"([\\`*_{}\[\]<>()#+\-.!|])")
 
 
 @dataclass(frozen=True)
@@ -262,6 +263,10 @@ def github_blob_url(occurrence: Occurrence) -> str:
     return f"https://github.com/{occurrence.repo}/blob/{occurrence.commit_sha}/{quoted_path}#L{occurrence.line}"
 
 
+def escape_markdown(text: str) -> str:
+    return MARKDOWN_ESCAPE_RE.sub(r"\\\1", text)
+
+
 def build_count_details(occurrences: list[Occurrence]) -> str:
     items = []
     sorted_occurrences = sorted(
@@ -270,7 +275,9 @@ def build_count_details(occurrences: list[Occurrence]) -> str:
     )
     for occurrence in sorted_occurrences:
         label = html.escape(
-            f"{occurrence.repo}/{occurrence.file_path}:{occurrence.line}"
+            escape_markdown(
+                f"{occurrence.repo}/{occurrence.file_path}:{occurrence.line}"
+            )
         )
         items.append(f'<li><a href="{github_blob_url(occurrence)}">{label}</a></li>')
 
@@ -283,7 +290,9 @@ def build_repo_count_details(occurrences: list[Occurrence]) -> str:
         occurrences, key=lambda item: f"{item.file_path}:{item.line}".casefold()
     )
     for occurrence in sorted_occurrences:
-        label = html.escape(f"{occurrence.file_path}:{occurrence.line}")
+        label = html.escape(
+            escape_markdown(f"{occurrence.file_path}:{occurrence.line}")
+        )
         items.append(f'<li><a href="{github_blob_url(occurrence)}">{label}</a></li>')
 
     return f"<details><summary>{len(occurrences)}</summary><ol>{''.join(items)}</ol></details>"
@@ -330,7 +339,8 @@ def build_summary(
         repo_to_occurrences.items(), key=lambda item: (-len(item[1]), item[0])
     )[:5]:
         count_details = build_repo_count_details(occurrences)
-        lines.append(f"| [{repo}](https://github.com/{repo}) | {count_details} |")
+        repo_label = escape_markdown(repo)
+        lines.append(f"| [{repo_label}](https://github.com/{repo}) | {count_details} |")
 
     lines.extend(
         [
@@ -349,10 +359,10 @@ def build_summary(
     for rule, _ in counter.most_common(10):
         count_details = build_count_details(rule_to_occurrences[rule])
         repos_list = ", ".join(
-            f"[{repo}](https://github.com/{repo})"
+            f"[{escape_markdown(repo)}](https://github.com/{repo})"
             for repo in sorted(rule_to_repos[rule])
         )
-        lines.append(f"| `{rule}` | {count_details} | {repos_list} |")
+        lines.append(f"| {escape_markdown(rule)} | {count_details} | {repos_list} |")
 
     return "\n".join(lines) + "\n"
 
