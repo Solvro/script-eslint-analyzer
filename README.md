@@ -5,10 +5,13 @@ CLI tool that discovers selected Solvro repositories, syncs local clones, scans 
 ## Current Findings
 
 <!-- eslint-analyzer-summary:start -->
-Analyzed repositories: **49**
-Skipped repositories: **0**
-Total ESLint disable directives found: **381**
-Unique ignored rules: **85**
+| Status | Metric | Value |
+| --- | --- | ---: |
+| 🕒 | Last updated | **2026-05-24 13:14 UTC** |
+| ✅ | Analyzed repositories | **49** |
+| 🎉 | Skipped repositories | **None** |
+| 🔎 | Total ESLint disable directives found | **381** |
+| 📋 | Unique ignored rules | **85** |
 
 ### Top 10 Ignored Rules
 
