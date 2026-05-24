@@ -6,6 +6,7 @@ import re
 import subprocess
 from collections import Counter, defaultdict
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Iterable
 
@@ -210,11 +211,21 @@ def export_results(output: Path, fmt: str, counter: Counter[str], rule_to_repos:
 
 
 def build_summary(counter: Counter[str], rule_to_repos: dict[str, set[str]], analyzed: int, skipped: int) -> str:
+    total_directives = sum(counter.values())
+    analyzed_status = "✅" if analyzed > 0 else "❌"
+    skipped_status = "🎉" if skipped == 0 else "⚠️"
+    directives_status = "🧹" if total_directives == 0 else "🔎"
+    rules_status = "✅" if len(counter) == 0 else "📋"
+    last_updated = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
+
     lines = [
-        f"Analyzed repositories: **{analyzed}**",
-        f"Skipped repositories: **{skipped}**",
-        f"Total ESLint disable directives found: **{sum(counter.values())}**",
-        f"Unique ignored rules: **{len(counter)}**",
+        "| Status | Metric | Value |",
+        "| --- | --- | ---: |",
+        f"| 🕒 | Last updated | **{last_updated}** |",
+        f"| {analyzed_status} | Analyzed repositories | **{analyzed}** |",
+        f"| {skipped_status} | Skipped repositories | **{'None' if skipped == 0 else skipped}** |",
+        f"| {directives_status} | Total ESLint disable directives found | **{total_directives}** |",
+        f"| {rules_status} | Unique ignored rules | **{len(counter)}** |",
         "",
         "### Top 10 Ignored Rules",
         "",
