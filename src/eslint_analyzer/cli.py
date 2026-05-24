@@ -6,10 +6,10 @@ import json
 import re
 import subprocess
 from collections import Counter, defaultdict
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Iterable
 from urllib.parse import quote
 
 import click
@@ -275,6 +275,15 @@ def build_count_details(occurrences: list[Occurrence]) -> str:
     return f"<details><summary>{len(occurrences)}</summary><ul>{''.join(items)}</ul></details>"
 
 
+def build_repo_count_details(occurrences: list[Occurrence]) -> str:
+    items = []
+    for occurrence in sorted(occurrences, key=lambda item: (item.file_path, item.line)):
+        label = html.escape(f"{occurrence.file_path}:{occurrence.line}")
+        items.append(f'<li><a href="{github_blob_url(occurrence)}">{label}</a></li>')
+
+    return f"<details><summary>{len(occurrences)}</summary><ul>{''.join(items)}</ul></details>"
+
+
 def build_summary(
     counter: Counter[str],
     rule_to_repos: dict[str, set[str]],
@@ -283,11 +292,10 @@ def build_summary(
     skipped: int,
 ) -> str:
     total_directives = sum(counter.values())
-    repo_counter: Counter[str] = Counter(
-        occurrence.repo
-        for occurrences in rule_to_occurrences.values()
-        for occurrence in occurrences
-    )
+    repo_to_occurrences: dict[str, list[Occurrence]] = defaultdict(list)
+    for occurrences in rule_to_occurrences.values():
+        for occurrence in occurrences:
+            repo_to_occurrences[occurrence.repo].append(occurrence)
     last_updated = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
 
     lines = [
@@ -313,8 +321,11 @@ def build_summary(
             "| --- | ---: |",
         ]
     )
-    for repo, count in repo_counter.most_common(5):
-        lines.append(f"| [{repo}](https://github.com/{repo}) | {count} |")
+    for repo, occurrences in sorted(
+        repo_to_occurrences.items(), key=lambda item: (-len(item[1]), item[0])
+    )[:5]:
+        count_details = build_repo_count_details(occurrences)
+        lines.append(f"| [{repo}](https://github.com/{repo}) | {count_details} |")
 
     lines.extend(
         [
