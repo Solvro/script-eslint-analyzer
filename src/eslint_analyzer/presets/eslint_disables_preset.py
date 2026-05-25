@@ -49,14 +49,26 @@ class EslintDisablesPreset(BasePreset):
     def occurrence_label(occurrence: Occurrence) -> str:
         return f"{occurrence.file_path}:{occurrence.line}"
 
+    @staticmethod
+    def occurrence_label_with_repo(occurrence: Occurrence) -> str:
+        short_sha = occurrence.commit_sha[:7]
+        return f"{occurrence.repo}@{short_sha} {occurrence.file_path}:{occurrence.line}"
+
     @classmethod
     def build_occurrence_details(
-        cls, occurrences: list[Occurrence], summary: int
+        cls,
+        occurrences: list[Occurrence],
+        summary: int,
+        include_repo_context: bool,
     ) -> str:
         lines = [f"<details><summary>{summary}</summary><ul>"]
         for occurrence in occurrences:
             url = cls.occurrence_url(occurrence)
-            label = cls.occurrence_label(occurrence)
+            label = (
+                cls.occurrence_label_with_repo(occurrence)
+                if include_repo_context
+                else cls.occurrence_label(occurrence)
+            )
             lines.append(f'<li><a href="{url}">{label}</a></li>')
         lines.append("</ul></details>")
         return "".join(lines)
@@ -148,7 +160,7 @@ class EslintDisablesPreset(BasePreset):
                     "### Most Cursed Codebases",
                     "",
                     "| Repository | Ignores |",
-                    "| --- | ---: |",
+                    "| --- | --- |",
                 ]
             )
             for repo, total in sorted(
@@ -158,7 +170,11 @@ class EslintDisablesPreset(BasePreset):
                     repo_occurrences.get(repo, []),
                     key=lambda occ: (occ.file_path, occ.line),
                 )
-                details = self.build_occurrence_details(occurrences, total)
+                details = self.build_occurrence_details(
+                    occurrences,
+                    total,
+                    include_repo_context=False,
+                )
                 lines.append(f"| [{repo}](https://github.com/{repo}) | {details} |")
             lines.append("")
 
@@ -167,7 +183,7 @@ class EslintDisablesPreset(BasePreset):
                 "### Top 10 Ignored Rules",
                 "",
                 "| Rule | Count | Repositories |",
-                "| --- | ---: | --- |",
+                "| --- | --- | --- |",
             ]
         )
 
@@ -176,7 +192,11 @@ class EslintDisablesPreset(BasePreset):
                 rule_to_occurrences.get(rule, []),
                 key=lambda occ: (occ.repo, occ.file_path, occ.line),
             )
-            details = self.build_occurrence_details(occurrences, count)
+            details = self.build_occurrence_details(
+                occurrences,
+                count,
+                include_repo_context=True,
+            )
             repo_links = ", ".join(
                 f"[{repo}](https://github.com/{repo})"
                 for repo in sorted(rule_to_repos.get(rule, set()))
