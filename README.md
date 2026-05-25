@@ -52,6 +52,13 @@ CLI tool that discovers selected Solvro repositories, syncs local clones, scans 
 uv sync
 ```
 
+## Lint and format
+
+```bash
+./scripts/lint.sh
+./scripts/format.sh
+```
+
 ## Run
 
 ```bash
@@ -65,11 +72,29 @@ uv run eslint-analyzer --org Solvro --root-dir ~/repos --output result.tsv --for
 - `--output` output report path (default: `result.tsv`)
 - `--summary-output` optional Markdown summary file path, for example `summary.md`
 - `--format` report format (`tsv` or `csv`, default: `tsv`)
+- `--cleanup-cloned-repo` delete repositories cloned during current run after analysis
+- `--preset` analysis preset (`eslint-disable` or `eslint-errors`, default: `eslint-disable`)
+- `--jobs` maximum number of repositories analyzed in parallel (default: `4`)
 
 ## Output schema
 
-Columns:
+### `eslint-disable` preset
 
 1. `rule`
 2. `count`
 3. `repositories` (comma-separated sorted `Org/repo` list)
+
+### `eslint-errors` preset
+
+Primary report (`--output`) columns:
+
+1. `rule`
+2. `errors`
+3. `warnings`
+
+Per-repository report (`<output>.per_repo.<ext>`) columns:
+
+1. `repo`
+2. `rule`
+3. `errors`
+4. `warnings`
