@@ -83,19 +83,12 @@ class Analysis:
         return repos
 
     @staticmethod
-    def build_summary(counter: Counter[str], analyzed: int, skipped: int) -> str:
-        now = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
-        lines = [
-            "| Metric | Value |",
-            "| --- | ---: |",
-            f"| Last updated | **{now}** |",
-            f"| Analyzed repositories | **{analyzed}** |",
-            f"| Skipped repositories | **{'None' if skipped == 0 else skipped}** |",
-            f"| Total ESLint disable directives found | **{sum(counter.values())}** |",
-            f"| Unique ignored rules | **{len(counter)}** |",
-            "",
-        ]
-        return "\n".join(lines) + "\n"
+    def create_preset(preset_name: str, repo: Repo, root_dir: Path) -> BasePreset:
+        if preset_name == "eslint-disable":
+            return EslintDisablesPreset(repo, root_dir)
+        if preset_name == "eslint-errors":
+            return EslintErrorsPreset(repo, root_dir)
+        raise ValueError(f"Unknown preset: {preset_name}")
 
     @staticmethod
     def format_exception(exc: Exception) -> str:
@@ -131,12 +124,9 @@ class Analysis:
         repo_path = root_dir / repo.name
         existed_before = repo_path.exists()
 
-        preset: BasePreset
-        if preset_name == "eslint-disable":
-            preset = EslintDisablesPreset(repo, root_dir)
-        elif preset_name == "eslint-errors":
-            preset = EslintErrorsPreset(repo, root_dir)
-        else:
+        try:
+            preset = Analysis.create_preset(preset_name, repo, root_dir)
+        except ValueError:
             return RepoAnalysisResult(
                 repo=repo, ok=False, reason=f"Unknown preset: {preset_name}", payload={}
             )
@@ -247,6 +237,8 @@ class Analysis:
 
         disable_counter: Counter[str] = Counter()
         disable_rule_to_repos: dict[str, set[str]] = defaultdict(set)
+        disable_rule_to_occurrences: dict[str, list] = defaultdict(list)
+        disable_repo_totals: dict[str, int] = defaultdict(int)
 
         aggregate_counts: dict[str, dict[str, int]] = defaultdict(
             lambda: {"errors": 0, "warnings": 0}
@@ -279,8 +271,15 @@ class Analysis:
                 logger.info("Analyzed {}", result.repo.full_name)
                 if result.payload.get("mode") == "eslint-disable":
                     disable_counter.update(result.payload["counter"])
+                    disable_repo_totals[result.repo.full_name] += result.payload.get(
+                        "repo_disable_count", 0
+                    )
                     for rule, repos_set in result.payload["rule_to_repos"].items():
                         disable_rule_to_repos[rule].update(repos_set)
+                    for rule, occurrences in result.payload[
+                        "rule_to_occurrences"
+                    ].items():
+                        disable_rule_to_occurrences[rule].extend(occurrences)
                 elif result.payload.get("mode") == "eslint-errors":
                     repo_name = result.payload["repo"]
                     for rule, counts in result.payload["counts"].items():
@@ -297,10 +296,26 @@ class Analysis:
             )
             logger.success("Saved report to {}", output)
             if summary_output is not None:
-                summary_output.write_text(
-                    Analysis.build_summary(disable_counter, analyzed, skipped),
-                    encoding="utf-8",
+                renderer_repo = Repo(
+                    org=org,
+                    name="__summary__",
+                    default_branch="main",
                 )
+                renderer = Analysis.create_preset(preset_name, renderer_repo, root_dir)
+                markdown = renderer.generate_markdown(
+                    {
+                        "generated_at": datetime.now(UTC).strftime(
+                            "%Y-%m-%d %H:%M UTC"
+                        ),
+                        "analyzed": analyzed,
+                        "skipped": skipped,
+                        "counter": disable_counter,
+                        "rule_to_repos": disable_rule_to_repos,
+                        "rule_to_occurrences": disable_rule_to_occurrences,
+                        "repo_totals": dict(disable_repo_totals),
+                    }
+                )
+                summary_output.write_text(markdown, encoding="utf-8")
                 logger.success("Saved summary to {}", summary_output)
             click.echo("\nTop 10 ignored rules:")
             for idx, (rule, count) in enumerate(
@@ -317,6 +332,26 @@ class Analysis:
                 "Saved per-repo report to {}",
                 output.with_name(f"{output.stem}.per_repo{output.suffix}"),
             )
+            if summary_output is not None:
+                renderer_repo = Repo(
+                    org=org,
+                    name="__summary__",
+                    default_branch="main",
+                )
+                renderer = Analysis.create_preset(preset_name, renderer_repo, root_dir)
+                markdown = renderer.generate_markdown(
+                    {
+                        "generated_at": datetime.now(UTC).strftime(
+                            "%Y-%m-%d %H:%M UTC"
+                        ),
+                        "analyzed": analyzed,
+                        "skipped": skipped,
+                        "aggregate_counts": aggregate_counts,
+                        "per_repo_counts": per_repo_counts,
+                    }
+                )
+                summary_output.write_text(markdown, encoding="utf-8")
+                logger.success("Saved summary to {}", summary_output)
             click.echo("\nTop 10 rules by total diagnostics:")
             ranked = sorted(
                 aggregate_counts.items(),
