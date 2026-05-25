@@ -74,6 +74,10 @@ class BasePreset(ABC):
     def analyze(self) -> dict:
         raise NotImplementedError
 
+    @abstractmethod
+    def generate_markdown(self, result: dict) -> str:
+        raise NotImplementedError
+
     def is_git_repo(self, path: Path) -> bool:
         try:
             proc = self.run_cmd(["git", "rev-parse", "--is-inside-work-tree"], cwd=path)
