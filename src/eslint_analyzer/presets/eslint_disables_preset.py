@@ -38,6 +38,29 @@ class Occurrence:
 
 
 class EslintDisablesPreset(BasePreset):
+    @staticmethod
+    def occurrence_url(occurrence: Occurrence) -> str:
+        return (
+            f"https://github.com/{occurrence.repo}/blob/{occurrence.commit_sha}/"
+            f"{occurrence.file_path}#L{occurrence.line}"
+        )
+
+    @staticmethod
+    def occurrence_label(occurrence: Occurrence) -> str:
+        return f"{occurrence.file_path}:{occurrence.line}"
+
+    @classmethod
+    def build_occurrence_details(
+        cls, occurrences: list[Occurrence], summary: int
+    ) -> str:
+        lines = [f"<details><summary>{summary}</summary><ul>"]
+        for occurrence in occurrences:
+            url = cls.occurrence_url(occurrence)
+            label = cls.occurrence_label(occurrence)
+            lines.append(f'<li><a href="{url}">{label}</a></li>')
+        lines.append("</ul></details>")
+        return "".join(lines)
+
     def current_commit_sha(self) -> str:
         return self.run_cmd(
             ["git", "rev-parse", "HEAD"], cwd=self.repo_path
@@ -102,6 +125,11 @@ class EslintDisablesPreset(BasePreset):
             "rule_to_occurrences", {}
         )
         repo_totals: dict[str, int] = result.get("repo_totals", {})
+        repo_occurrences: dict[str, list[Occurrence]] = defaultdict(list)
+
+        for occurrences in rule_to_occurrences.values():
+            for occ in occurrences:
+                repo_occurrences[occ.repo].append(occ)
 
         lines = [
             "| Metric | Value |",
@@ -126,7 +154,12 @@ class EslintDisablesPreset(BasePreset):
             for repo, total in sorted(
                 repo_totals.items(), key=lambda item: (-item[1], item[0])
             )[:5]:
-                lines.append(f"| [{repo}](https://github.com/{repo}) | {total} |")
+                occurrences = sorted(
+                    repo_occurrences.get(repo, []),
+                    key=lambda occ: (occ.file_path, occ.line),
+                )
+                details = self.build_occurrence_details(occurrences, total)
+                lines.append(f"| [{repo}](https://github.com/{repo}) | {details} |")
             lines.append("")
 
         lines.extend(
@@ -143,19 +176,11 @@ class EslintDisablesPreset(BasePreset):
                 rule_to_occurrences.get(rule, []),
                 key=lambda occ: (occ.repo, occ.file_path, occ.line),
             )
-            details = [f"<details><summary>{count}</summary><ul>"]
-            for occ in occurrences:
-                url = (
-                    f"https://github.com/{occ.repo}/blob/{occ.commit_sha}/"
-                    f"{occ.file_path}#L{occ.line}"
-                )
-                label = f"{occ.repo}/{occ.file_path}:{occ.line}"
-                details.append(f'<li><a href="{url}">{label}</a></li>')
-            details.append("</ul></details>")
+            details = self.build_occurrence_details(occurrences, count)
             repo_links = ", ".join(
                 f"[{repo}](https://github.com/{repo})"
                 for repo in sorted(rule_to_repos.get(rule, set()))
             )
-            lines.append(f"| `{rule}` | {''.join(details)} | {repo_links} |")
+            lines.append(f"| `{rule}` | {details} | {repo_links} |")
 
         return "\n".join(lines).rstrip() + "\n"
