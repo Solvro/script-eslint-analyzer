@@ -14,10 +14,7 @@ import click
 from loguru import logger
 
 from eslint_analyzer.presets.base_preset import BasePreset, Repo
-from eslint_analyzer.presets.eslint_disables_preset import (
-    EslintDisablesPreset,
-    Occurrence,
-)
+from eslint_analyzer.presets.eslint_disables_preset import EslintDisablesPreset
 from eslint_analyzer.presets.eslint_errors_preset import EslintErrorsPreset
 
 
@@ -52,10 +49,25 @@ class Analysis:
             )
         except FileNotFoundError as exc:
             raise click.ClickException("Missing `gh` CLI in PATH.") from exc
+        except subprocess.CalledProcessError as exc:
+            raise click.ClickException(
+                f"Failed to fetch repositories: {Analysis.format_exception(exc)}"
+            ) from exc
 
-        payload = json.loads(output)
+        try:
+            payload = json.loads(output)
+        except json.JSONDecodeError as exc:
+            raise click.ClickException(
+                f"GitHub API returned invalid JSON: {exc.msg}"
+            ) from exc
+
+        if not isinstance(payload, list):
+            raise click.ClickException("GitHub API response must be a JSON list.")
+
         repos: list[Repo] = []
         for item in payload:
+            if not isinstance(item, dict):
+                continue
             name = item.get("name")
             default_branch = item.get("default_branch")
             archived = bool(item.get("archived"))
@@ -171,15 +183,17 @@ class Analysis:
     @staticmethod
     def export_errors_results(
         output: Path,
+        fmt: str,
         aggregate_counts: dict[str, dict[str, int]],
         per_repo_counts: dict[str, dict[str, dict[str, int]]],
     ) -> None:
+        delimiter = "\t" if fmt == "tsv" else ","
         rows = sorted(
             aggregate_counts.items(),
             key=lambda item: (-(item[1]["errors"] + item[1]["warnings"]), item[0]),
         )
         with output.open("w", encoding="utf-8", newline="") as fp:
-            writer = csv.writer(fp, delimiter="\t")
+            writer = csv.writer(fp, delimiter=delimiter)
             writer.writerow(["rule", "errors", "warnings"])
             total_errors = 0
             total_warnings = 0
@@ -191,7 +205,7 @@ class Analysis:
 
         per_repo_output = output.with_name(f"{output.stem}.per_repo{output.suffix}")
         with per_repo_output.open("w", encoding="utf-8", newline="") as fp:
-            writer = csv.writer(fp, delimiter="\t")
+            writer = csv.writer(fp, delimiter=delimiter)
             writer.writerow(["repo", "rule", "errors", "warnings"])
             for repo in sorted(per_repo_counts):
                 repo_total_errors = 0
@@ -233,7 +247,6 @@ class Analysis:
 
         disable_counter: Counter[str] = Counter()
         disable_rule_to_repos: dict[str, set[str]] = defaultdict(set)
-        disable_rule_to_occurrences: dict[str, list[Occurrence]] = defaultdict(list)
 
         aggregate_counts: dict[str, dict[str, int]] = defaultdict(
             lambda: {"errors": 0, "warnings": 0}
@@ -268,10 +281,6 @@ class Analysis:
                     disable_counter.update(result.payload["counter"])
                     for rule, repos_set in result.payload["rule_to_repos"].items():
                         disable_rule_to_repos[rule].update(repos_set)
-                    for rule, occurrences in result.payload[
-                        "rule_to_occurrences"
-                    ].items():
-                        disable_rule_to_occurrences[rule].extend(occurrences)
                 elif result.payload.get("mode") == "eslint-errors":
                     repo_name = result.payload["repo"]
                     for rule, counts in result.payload["counts"].items():
@@ -300,7 +309,9 @@ class Analysis:
                 click.secho(f"{idx:>2}. {rule}", fg="cyan", bold=True, nl=False)
                 click.echo(f" -> {count}")
         else:
-            Analysis.export_errors_results(output, aggregate_counts, per_repo_counts)
+            Analysis.export_errors_results(
+                output, output_format, aggregate_counts, per_repo_counts
+            )
             logger.success("Saved report to {}", output)
             logger.success(
                 "Saved per-repo report to {}",

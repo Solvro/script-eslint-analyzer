@@ -33,13 +33,30 @@ class EslintErrorsPreset(BasePreset):
             raise RuntimeError(f"Unsupported package manager: {package_manager}")
 
         stdout = proc.stdout.strip()
-        payload = json.loads(stdout) if stdout else []
+        stderr = (proc.stderr or "").strip()
+
+        if proc.returncode not in (0, 1):
+            detail = stderr or stdout or f"eslint exited with code {proc.returncode}"
+            raise RuntimeError(f"ESLint execution failed: {detail}")
+
+        try:
+            payload = json.loads(stdout) if stdout else []
+        except json.JSONDecodeError as exc:
+            detail = stderr or stdout or "missing eslint JSON output"
+            raise RuntimeError(f"Failed to parse ESLint JSON output: {detail}") from exc
+
+        if not isinstance(payload, list):
+            raise RuntimeError("Unexpected ESLint JSON format: expected a list")
         counts: dict[str, dict[str, int]] = defaultdict(
             lambda: {"errors": 0, "warnings": 0}
         )
 
         for file_report in payload:
+            if not isinstance(file_report, dict):
+                continue
             for message in file_report.get("messages", []):
+                if not isinstance(message, dict):
+                    continue
                 rule = message.get("ruleId") or "__unknown_rule__"
                 severity = message.get("severity")
                 if severity == 2:
