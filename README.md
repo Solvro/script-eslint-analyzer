@@ -65,6 +65,8 @@ uv run eslint-analyzer --org Solvro --root-dir ~/repos --output result.tsv --for
 - `--output` output report path (default: `result.tsv`)
 - `--summary-output` optional Markdown summary file path, for example `summary.md`
 - `--format` report format (`tsv` or `csv`, default: `tsv`)
+- `--cleanup-cloned-repo` delete repositories cloned during current run after analysis
+- `--preset` analysis preset (`eslint-disable` or `eslint-run`, default: `eslint-disable`)
 
 ## Output schema
 

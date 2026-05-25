@@ -6,6 +6,7 @@ import json
 import re
 import shutil
 import subprocess
+from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from collections import Counter, defaultdict
 from collections.abc import Iterable
@@ -66,6 +67,80 @@ class RepoAnalysisResult:
     counter: Counter[str]
     rule_to_repos: dict[str, set[str]]
     rule_to_occurrences: dict[str, list[Occurrence]]
+
+
+class BasePreset(ABC):
+    def __init__(self, repo: Repo, root_dir: Path):
+        self.repo = repo
+        self.root_dir = root_dir
+        self.repo_path = root_dir / repo.name
+        self.package_manager: str | None = None
+
+    def prepare_repo(self) -> tuple[bool, str | None]:
+        return sync_repo(self.repo, self.root_dir)
+
+    def detect_package_manager(self) -> str:
+        if (self.repo_path / "pnpm-lock.yaml").exists():
+            self.package_manager = "pnpm"
+            return self.package_manager
+        if (self.repo_path / "package-lock.json").exists():
+            self.package_manager = "npm"
+            return self.package_manager
+        if (self.repo_path / "yarn.lock").exists():
+            self.package_manager = "yarn"
+            return self.package_manager
+        self.package_manager = "npm"
+        return self.package_manager
+
+    def install_dependencies(self) -> None:
+        package_manager = self.detect_package_manager()
+        if package_manager == "pnpm":
+            run_cmd(["pnpm", "install", "--frozen-lockfile"], cwd=self.repo_path)
+            return
+        if package_manager == "npm":
+            run_cmd(["npm", "ci"], cwd=self.repo_path)
+            return
+        if package_manager == "yarn":
+            run_cmd(["yarn", "install", "--immutable"], cwd=self.repo_path)
+            return
+        raise click.ClickException(f"Unsupported package manager: {package_manager}")
+
+    @abstractmethod
+    def analyze(
+        self,
+    ) -> tuple[Counter[str], dict[str, set[str]], dict[str, list[Occurrence]]]:
+        raise NotImplementedError
+
+
+class EslintDisablePreset(BasePreset):
+    def analyze(
+        self,
+    ) -> tuple[Counter[str], dict[str, set[str]], dict[str, list[Occurrence]]]:
+        counter: Counter[str] = Counter()
+        rule_to_repos: dict[str, set[str]] = defaultdict(set)
+        rule_to_occurrences: dict[str, list[Occurrence]] = defaultdict(list)
+
+        scan_repo(
+            self.repo,
+            self.repo_path,
+            current_commit_sha(self.repo_path),
+            counter,
+            rule_to_repos,
+            rule_to_occurrences,
+        )
+        return counter, rule_to_repos, rule_to_occurrences
+
+
+class EslintRunPreset(EslintDisablePreset):
+    def analyze(
+        self,
+    ) -> tuple[Counter[str], dict[str, set[str]], dict[str, list[Occurrence]]]:
+        self.install_dependencies()
+        if self.package_manager == "pnpm":
+            run_cmd(["pnpm", "exec", "eslint", "."], cwd=self.repo_path, check=False)
+        else:
+            run_cmd(["npm", "exec", "eslint", "."], cwd=self.repo_path, check=False)
+        return super().analyze()
 
 
 def setup_logging() -> None:
@@ -397,6 +472,7 @@ def analyze_repo(
     repo: Repo,
     root_dir: Path,
     cleanup_cloned_repo: bool,
+    preset_name: str,
 ) -> RepoAnalysisResult:
     repo_path = root_dir / repo.name
     existed_before = repo_path.exists()
@@ -405,8 +481,23 @@ def analyze_repo(
     rule_to_repos: dict[str, set[str]] = defaultdict(set)
     rule_to_occurrences: dict[str, list[Occurrence]] = defaultdict(list)
 
+    preset: BasePreset
+    if preset_name == "eslint-disable":
+        preset = EslintDisablePreset(repo, root_dir)
+    elif preset_name == "eslint-run":
+        preset = EslintRunPreset(repo, root_dir)
+    else:
+        return RepoAnalysisResult(
+            repo=repo,
+            ok=False,
+            reason=f"Unknown preset: {preset_name}",
+            counter=counter,
+            rule_to_repos=rule_to_repos,
+            rule_to_occurrences=rule_to_occurrences,
+        )
+
     try:
-        ok, reason = sync_repo(repo, root_dir)
+        ok, reason = preset.prepare_repo()
         if not ok:
             return RepoAnalysisResult(
                 repo=repo,
@@ -416,15 +507,7 @@ def analyze_repo(
                 rule_to_repos=rule_to_repos,
                 rule_to_occurrences=rule_to_occurrences,
             )
-
-        scan_repo(
-            repo,
-            repo_path,
-            current_commit_sha(repo_path),
-            counter,
-            rule_to_repos,
-            rule_to_occurrences,
-        )
+        counter, rule_to_repos, rule_to_occurrences = preset.analyze()
         return RepoAnalysisResult(
             repo=repo,
             ok=True,
@@ -481,6 +564,14 @@ def analyze_repo(
     is_flag=True,
     help="Remove repos cloned by this run after analysis",
 )
+@click.option(
+    "--preset",
+    "preset_name",
+    type=click.Choice(["eslint-disable", "eslint-run"]),
+    default="eslint-disable",
+    show_default=True,
+    help="Analysis preset to run",
+)
 def main(
     org: str,
     root_dir: Path,
@@ -488,6 +579,7 @@ def main(
     summary_output: Path | None,
     output_format: str,
     cleanup_cloned_repo: bool,
+    preset_name: str,
 ) -> None:
     setup_logging()
 
@@ -508,7 +600,13 @@ def main(
 
     with ThreadPoolExecutor() as executor:
         futures = [
-            executor.submit(analyze_repo, repo, root_dir, cleanup_cloned_repo)
+            executor.submit(
+                analyze_repo,
+                repo,
+                root_dir,
+                cleanup_cloned_repo,
+                preset_name,
+            )
             for repo in repos
         ]
         for future in as_completed(futures):
