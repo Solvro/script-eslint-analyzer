@@ -17,9 +17,15 @@ class EslintErrorsPreset(BasePreset):
                 cwd=self.repo_path,
                 check=False,
             )
-        elif package_manager in {"npm", "yarn"}:
+        elif package_manager == "npm":
             proc = self.run_cmd(
                 ["npm", "exec", "eslint", ".", "-f", "json"],
+                cwd=self.repo_path,
+                check=False,
+            )
+        elif package_manager == "yarn":
+            proc = self.run_cmd(
+                ["yarn", "exec", "eslint", ".", "-f", "json"],
                 cwd=self.repo_path,
                 check=False,
             )

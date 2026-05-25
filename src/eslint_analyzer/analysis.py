@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+import subprocess
 import shutil
 from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -85,6 +86,30 @@ class Analysis:
         return "\n".join(lines) + "\n"
 
     @staticmethod
+    def format_exception(exc: Exception) -> str:
+        if isinstance(exc, subprocess.CalledProcessError):
+            parts = [f"{exc.__class__.__name__}: command failed"]
+            if exc.cmd:
+                if isinstance(exc.cmd, list):
+                    parts.append(f"cmd={' '.join(exc.cmd)}")
+                else:
+                    parts.append(f"cmd={exc.cmd}")
+            if exc.returncode is not None:
+                parts.append(f"exit_code={exc.returncode}")
+            stderr = (exc.stderr or "").strip()
+            stdout = (exc.stdout or "").strip()
+            if stderr:
+                parts.append(f"stderr={stderr}")
+            elif stdout:
+                parts.append(f"stdout={stdout}")
+            return " | ".join(parts)
+
+        message = str(exc).strip()
+        if message:
+            return f"{exc.__class__.__name__}: {message}"
+        return exc.__class__.__name__
+
+    @staticmethod
     def analyze_repo(
         repo: Repo,
         root_dir: Path,
@@ -114,10 +139,19 @@ class Analysis:
                 repo=repo, ok=True, reason=None, payload=preset.analyze()
             )
         except Exception as exc:
-            return RepoAnalysisResult(repo=repo, ok=False, reason=str(exc), payload={})
+            return RepoAnalysisResult(
+                repo=repo, ok=False, reason=Analysis.format_exception(exc), payload={}
+            )
         finally:
             if cleanup_cloned_repo and not existed_before and repo_path.exists():
-                shutil.rmtree(repo_path, ignore_errors=True)
+                try:
+                    shutil.rmtree(repo_path)
+                except OSError as exc:
+                    logger.warning(
+                        "Failed to cleanup {}: {}",
+                        repo_path,
+                        Analysis.format_exception(exc),
+                    )
 
     @staticmethod
     def export_disable_results(
@@ -183,6 +217,7 @@ class Analysis:
         output_format: str,
         cleanup_cloned_repo: bool,
         preset_name: str,
+        jobs: int,
     ) -> None:
         Analysis.setup_logging()
 
@@ -207,7 +242,7 @@ class Analysis:
             lambda: defaultdict(lambda: {"errors": 0, "warnings": 0})
         )
 
-        with ThreadPoolExecutor() as executor:
+        with ThreadPoolExecutor(max_workers=jobs) as executor:
             futures = [
                 executor.submit(
                     Analysis.analyze_repo,

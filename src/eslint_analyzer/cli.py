@@ -49,6 +49,13 @@ from eslint_analyzer.analysis import Analysis
     show_default=True,
     help="Analysis preset to run",
 )
+@click.option(
+    "--jobs",
+    default=4,
+    show_default=True,
+    type=click.IntRange(min=1),
+    help="Maximum number of repositories analyzed in parallel",
+)
 def main(
     org: str,
     root_dir: Path,
@@ -57,6 +64,7 @@ def main(
     output_format: str,
     cleanup_cloned_repo: bool,
     preset_name: str,
+    jobs: int,
 ) -> None:
     Analysis.run(
         org=org,
@@ -66,6 +74,7 @@ def main(
         output_format=output_format,
         cleanup_cloned_repo=cleanup_cloned_repo,
         preset_name=preset_name,
+        jobs=jobs,
     )
 
 
