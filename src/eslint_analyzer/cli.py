@@ -4,7 +4,9 @@ import csv
 import html
 import json
 import re
+import shutil
 import subprocess
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from collections import Counter, defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -54,6 +56,16 @@ class Occurrence:
     commit_sha: str
     file_path: str
     line: int
+
+
+@dataclass
+class RepoAnalysisResult:
+    repo: Repo
+    ok: bool
+    reason: str | None
+    counter: Counter[str]
+    rule_to_repos: dict[str, set[str]]
+    rule_to_occurrences: dict[str, list[Occurrence]]
 
 
 def setup_logging() -> None:
@@ -381,6 +393,60 @@ def export_summary(
     )
 
 
+def analyze_repo(
+    repo: Repo,
+    root_dir: Path,
+    cleanup_cloned_repo: bool,
+) -> RepoAnalysisResult:
+    repo_path = root_dir / repo.name
+    existed_before = repo_path.exists()
+
+    counter: Counter[str] = Counter()
+    rule_to_repos: dict[str, set[str]] = defaultdict(set)
+    rule_to_occurrences: dict[str, list[Occurrence]] = defaultdict(list)
+
+    try:
+        ok, reason = sync_repo(repo, root_dir)
+        if not ok:
+            return RepoAnalysisResult(
+                repo=repo,
+                ok=False,
+                reason=reason,
+                counter=counter,
+                rule_to_repos=rule_to_repos,
+                rule_to_occurrences=rule_to_occurrences,
+            )
+
+        scan_repo(
+            repo,
+            repo_path,
+            current_commit_sha(repo_path),
+            counter,
+            rule_to_repos,
+            rule_to_occurrences,
+        )
+        return RepoAnalysisResult(
+            repo=repo,
+            ok=True,
+            reason=None,
+            counter=counter,
+            rule_to_repos=rule_to_repos,
+            rule_to_occurrences=rule_to_occurrences,
+        )
+    except Exception as exc:
+        return RepoAnalysisResult(
+            repo=repo,
+            ok=False,
+            reason=str(exc),
+            counter=counter,
+            rule_to_repos=rule_to_repos,
+            rule_to_occurrences=rule_to_occurrences,
+        )
+    finally:
+        if cleanup_cloned_repo and not existed_before and repo_path.exists():
+            shutil.rmtree(repo_path, ignore_errors=True)
+
+
 @click.command()
 @click.option("--org", default="Solvro", show_default=True, help="GitHub organization")
 @click.option(
@@ -410,12 +476,18 @@ def export_summary(
     show_default=True,
     help="Output format",
 )
+@click.option(
+    "--cleanup-cloned-repo",
+    is_flag=True,
+    help="Remove repos cloned by this run after analysis",
+)
 def main(
     org: str,
     root_dir: Path,
     output: Path,
     summary_output: Path | None,
     output_format: str,
+    cleanup_cloned_repo: bool,
 ) -> None:
     setup_logging()
 
@@ -434,28 +506,25 @@ def main(
     analyzed = 0
     skipped = 0
 
-    for repo in repos:
-        ok, reason = sync_repo(repo, root_dir)
-        if not ok:
-            skipped += 1
-            logger.error("Skipping {}: {}", repo.full_name, reason)
-            continue
+    with ThreadPoolExecutor() as executor:
+        futures = [
+            executor.submit(analyze_repo, repo, root_dir, cleanup_cloned_repo)
+            for repo in repos
+        ]
+        for future in as_completed(futures):
+            result = future.result()
+            if not result.ok:
+                skipped += 1
+                logger.error("Skipping {}: {}", result.repo.full_name, result.reason)
+                continue
 
-        try:
-            repo_path = root_dir / repo.name
-            scan_repo(
-                repo,
-                repo_path,
-                current_commit_sha(repo_path),
-                counter,
-                rule_to_repos,
-                rule_to_occurrences,
-            )
             analyzed += 1
-            logger.info("Analyzed {}", repo.full_name)
-        except Exception as exc:
-            skipped += 1
-            logger.error("Failed {}: {}", repo.full_name, exc)
+            logger.info("Analyzed {}", result.repo.full_name)
+            counter.update(result.counter)
+            for rule, repos_set in result.rule_to_repos.items():
+                rule_to_repos[rule].update(repos_set)
+            for rule, occurrences in result.rule_to_occurrences.items():
+                rule_to_occurrences[rule].extend(occurrences)
 
     export_results(output, output_format, counter, rule_to_repos)
     logger.success("Saved report to {}", output)
