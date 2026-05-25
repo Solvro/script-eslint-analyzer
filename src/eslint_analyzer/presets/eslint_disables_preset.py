@@ -39,6 +39,13 @@ class Occurrence:
 
 class EslintDisablesPreset(BasePreset):
     @staticmethod
+    def escape_markdown(text: str) -> str:
+        escaped = text.replace("\\", "\\\\")
+        for char in ("*", "_", "`", "[", "]", "(", ")", "|", "#"):
+            escaped = escaped.replace(char, f"\\{char}")
+        return escaped
+
+    @staticmethod
     def occurrence_url(occurrence: Occurrence) -> str:
         return (
             f"https://github.com/{occurrence.repo}/blob/{occurrence.commit_sha}/"
@@ -47,12 +54,14 @@ class EslintDisablesPreset(BasePreset):
 
     @staticmethod
     def occurrence_label(occurrence: Occurrence) -> str:
-        return f"{occurrence.file_path}:{occurrence.line}"
+        raw = f"{occurrence.file_path}:{occurrence.line}"
+        return EslintDisablesPreset.escape_markdown(raw)
 
     @staticmethod
     def occurrence_label_with_repo(occurrence: Occurrence) -> str:
         short_sha = occurrence.commit_sha[:7]
-        return f"{occurrence.repo}@{short_sha} {occurrence.file_path}:{occurrence.line}"
+        raw = f"{occurrence.repo}@{short_sha} {occurrence.file_path}:{occurrence.line}"
+        return EslintDisablesPreset.escape_markdown(raw)
 
     @classmethod
     def build_occurrence_details(
