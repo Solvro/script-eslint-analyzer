@@ -52,6 +52,13 @@ CLI tool that discovers selected Solvro repositories, syncs local clones, scans 
 uv sync
 ```
 
+## Lint and format
+
+```bash
+./scripts/lint.sh
+./scripts/format.sh
+```
+
 ## Run
 
 ```bash

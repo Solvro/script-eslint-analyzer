@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import csv
 import json
-import subprocess
 import shutil
+import subprocess
 from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
